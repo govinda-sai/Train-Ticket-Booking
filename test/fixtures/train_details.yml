@@ -1,0 +1,23 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  train_name: MyString
+  train_number: MyString
+  no_of_seats: 1
+  beginning_station: MyString
+  destination_station: MyString
+  stops: 
+  price_for_stop: 
+  start_time: 
+  end_time: 
+
+two:
+  train_name: MyString
+  train_number: MyString
+  no_of_seats: 1
+  beginning_station: MyString
+  destination_station: MyString
+  stops: 
+  price_for_stop: 
+  start_time: 
+  end_time: 

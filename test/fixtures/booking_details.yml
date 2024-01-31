@@ -1,0 +1,23 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  pnr_number: MyString
+  seats: 1
+  passenger_id: MyString
+  from_station: MyString
+  destination_station: MyString
+  train_name: MyString
+  train_number: MyString
+  date_of_booking: 
+  status: MyString
+
+two:
+  pnr_number: MyString
+  seats: 1
+  passenger_id: MyString
+  from_station: MyString
+  destination_station: MyString
+  train_name: MyString
+  train_number: MyString
+  date_of_booking: 
+  status: MyString
