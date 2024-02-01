@@ -16,7 +16,6 @@ class TrainDetailsController < ApplicationController # rubocop:disable Style/Doc
   def create
     @train_detail = TrainDetail.new(train_detail_params)
     if valid?(@train_detail)
-
       render json: { message: 'train created', created_train: @train_detail }, status: :created if @train_detail.save
     else
       render json: { message: 'train could not be created', errors: @train_detail.errors.full_messages },
@@ -45,19 +44,40 @@ class TrainDetailsController < ApplicationController # rubocop:disable Style/Doc
     end
   end
 
-  def search
+  def search # rubocop:disable Metrics/MethodLength
     search_term = params[:search_term]
     pattern = /\A#{search_term}/i
 
-    @train_details = TrainDetail.or({ train_name: pattern }, { train_number: pattern },
-                                    { beginning_station: pattern }, { destination_station: pattern },
-                                    { start_time: pattern }, { end_time: pattern })
+    @train_details = TrainDetail.or({ train_name: pattern },
+                                    { train_number: pattern },
+                                    { seats: pattern },
+                                    { beginning_station: pattern },
+                                    { destination_station: pattern },
+                                    { stops: pattern },
+                                    { start_time: pattern },
+                                    { end_time: pattern })
 
     if @train_details.present?
       render json: @train_details
     else
-      render json: { message: 'train name not found' }, status: :not_found
+      render json: { message: 'no matches found' }, status: :not_found
     end
+  end
+
+  def combination_search
+    search_params = params.require(:train_detail).permit(:train_name, :train_number, :seats,
+                                                         :beginning_station, :destination_station,
+                                                         :stops, :start_time, :end_time)
+    conditions = {}
+
+    search_params.each do |key, value|
+      conditions[key] = /#{value}/i if value.present?
+    end
+
+    @train_details = TrainDetail.or(conditions)
+
+    render json: (@train_details.present? ? @train_details : { message: 'no records found' }),
+           status: :not_found
   end
 
   private

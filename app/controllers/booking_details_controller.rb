@@ -72,6 +72,40 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
     end
   end
 
+  def search
+    search_term = params[:search_term]
+    pattern = /#{search_term}/i
+
+    @bookings = BookingDetail.or({ pnr_number: pattern },
+                                 { seats: pattern },
+                                 { from_station: pattern },
+                                 { destination_station: pattern },
+                                 { date_of_booking: pattern },
+                                 { travel_date: pattern },
+                                 { status: pattern })
+
+    render json: (@bookings.present? ? @bookings : { message: 'no matches found' }), status: :not_found
+  end
+
+  # combinational search
+  def combination_search # rubocop:disable Metrics/MethodLength
+    search_params = params.require(:booking_detail).permit(:pnr_number, :seats, :passenger_details_id, :train_details_id, :from_station, # rubocop:disable Layout/LineLength
+                                                           :destination_station, :date_of_booking, :travel_date, :status, :train_number) # rubocop:disable Layout/LineLength
+    conditions = {}
+
+    search_params.each do |key, value|
+      conditions[key] = /#{value}/i if value.present?
+    end
+
+    @booking_details = BookingDetail.or(conditions)
+
+    if @booking_details.present?
+      render json: @booking_details
+    else
+      render json: { message: 'no records found' }, status: :not_found
+    end
+  end
+
   # booked trains list
   def booked_trains
     status = 'confirmed'
@@ -80,46 +114,81 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
     if booked_collections.present?
       render json: booked_collections, status: :ok
     else
-      render json: { message: 'No booked collections found' }, status: :not_found
+      render json: { message: 'no booked collections found' }, status: :not_found
     end
   end
 
   # cancel booking
-  def cancel_booking # rubocop:disable Metrics/MethodLength
+  def cancel_booking
     @booking = BookingDetail.find(params[:id])
-    if @booking.present?
-      @booking.status = 'canceled'
+    if (@booking.status = 'canceled')
       if @booking.save
         render json: { message: 'booking canceled succesfully' }, status: :ok
       else
         render json: { message: 'failed to cancel booking' }, status: :unprocessable_entity
       end
-    else
-      render json: { message: 'booking id not found' }, status: :unprocessable_entity
     end
+  rescue Mongoid::Errors::DocumentNotFound
+    render json: { message: 'booking id not found' }, status: :not_found
   end
 
   # change schedule
   def change_schedule # rubocop:disable Metrics/MethodLength
     booking = BookingDetail.find(params[:id])
-
-    if booking.present?
-      if booking.status != 'canceled'
-        travel_date_param = params[:travel_date]
-        if travel_date_param > booking.travel_date
-          booking.travel_date = travel_date_param
-          if booking.save # rubocop:disable Metrics/BlockNesting
-            render json: { message: 'schedule changed successfully' }, status: :ok
-          else
-            render json: { message: 'failed to change schedule' }, status: :unprocessable_entity
-          end
+    if booking.status != 'canceled'
+      travel_date_param = params[:travel_date]
+      if travel_date_param > booking.travel_date
+        booking.travel_date = travel_date_param
+        if booking.save
+          render json: { message: 'schedule changed successfully' }, status: :ok
         else
-          render json: { message: 'schedule must be in future' }, status: :unprocessable_entity
+          render json: { message: 'failed to change schedule' }, status: :unprocessable_entity
         end
+      else
+        render json: { message: 'schedule must be in future' }, status: :unprocessable_entity
+      end
+    end
+  rescue Mongoid::Errors::DocumentNotFound
+    render json: { message: 'booking id not found' }, status: :not_found
+  end
+
+  # search by train name or train number
+  def search_by_train # rubocop:disable Metrics/MethodLength
+    search_term = params[:train_name] || params[:train_number]
+
+    if search_term.present?
+      train_detail = TrainDetail.or({ train_name: search_term }, { train_number: search_term }).first
+
+      if train_detail.present?
+        booking_details = BookingDetail.where(train_details_id: train_detail.id)
+        render json: { bookings: booking_details }
+      else
+        render json: { error: 'train not found' }, status: :not_found
       end
     else
-      render json: { messsage: 'no booking found' }, status: :not_found
+      render json: { error: 'train name or train number parameter is missing' }, status: :bad_request
     end
+  rescue Mongoid::Errors::DocumentNotFound
+    render json: { error: 'train not found' }, status: :not_found
+  end
+
+  # search by email
+  def search_by_email # rubocop:disable Metrics/MethodLength
+    email = params[:email]
+
+    if email.present?
+      passenger = PassengerDetail.find_by(email: email)
+      if passenger.present?
+        booking_details = BookingDetail.find_by(passenger_details_id: passenger.id)
+        render json: booking_details, status: :ok
+      else
+        render json: { message: 'passenger not found' }, status: :not_found
+      end
+    else
+      render json: { message: 'email can\'t be blank' }, status: :bad_request
+    end
+  rescue Mongoid::Errors::DocumentNotFound
+    render json: { error: 'passenger email not found' }, status: :not_found
   end
 
   private
@@ -142,7 +211,7 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
     end
   end
 
-  def valid?(booking) # rubocop:disable Metrics/MethodLength
+  def valid?(booking) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
     @booking = booking
 
     fields = %i[seats from_station destination_station date_of_booking travel_date status passenger_details_id
@@ -160,6 +229,11 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
     status_pattern = /\A\b(pending|confirmed|canceled)\b\z/i
     unless @booking.status.match?(status_pattern)
       @booking.errors.add(:status, '- invalid status')
+      return false
+    end
+
+    if @booking.seats > @booking.train.seats
+      @booking.errors.add(:seats, "- available train seats: #{@booking.train.seats}")
       return false
     end
 

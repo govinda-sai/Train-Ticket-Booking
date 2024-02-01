@@ -22,4 +22,8 @@ class BookingDetail # rubocop:disable Style/Documentation
   def passengers
     PassengerDetail.where(booking_details_id: id)
   end
+
+  def bookings
+    BookingDetails.where(booking_details_id: booking_details_id)
+  end
 end
