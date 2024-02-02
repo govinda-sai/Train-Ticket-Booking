@@ -17,6 +17,6 @@ class TrainDetail # rubocop:disable Style/Documentation
   field :booking_details_id, type: BSON::ObjectId
 
   def bookings
-    BookingDetails.where(booking_details_id: booking_details_id)
+    BookingDetails.where(train_details_id: id)
   end
 end

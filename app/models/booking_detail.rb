@@ -12,7 +12,8 @@ class BookingDetail # rubocop:disable Style/Documentation
   field :travel_date, type: DateTime
   field :status, type: String
 
-  field :passenger_details_id, type: BSON::ObjectId
+  field :passenger_details_ids, type: Array, default: []
+
   field :train_details_id, type: BSON::ObjectId
 
   def train
@@ -20,10 +21,6 @@ class BookingDetail # rubocop:disable Style/Documentation
   end
 
   def passengers
-    PassengerDetail.where(booking_details_id: id)
-  end
-
-  def bookings
-    BookingDetails.where(booking_details_id: booking_details_id)
+    PassengerDetail.in(id: passenger_details_ids)
   end
 end

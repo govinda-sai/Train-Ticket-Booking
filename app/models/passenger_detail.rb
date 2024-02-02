@@ -12,7 +12,7 @@ class PassengerDetail # rubocop:disable Style/Documentation
 
   field :booking_details_id, type: BSON::ObjectId
 
-  def booking
-    BookingDetail.find(booking_details_id)
-  end
+  # def booking
+  #   BookingDetail.find(booking_details_id)
+  # end
 end

@@ -3,47 +3,33 @@
 class BookingDetailsController < ApplicationController # rubocop:disable Style/Documentation,Metrics/ClassLength
   before_action :set_booking_detail, only: %i[show update destroy]
 
-  def index # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
-    @booking_details = BookingDetail.all.map do |booking|
-      {
-        booking_id: booking.id,
-        pnr_number: booking.pnr_number,
-        seats_booked: booking.seats,
-        passenger_details: booking.passengers.map do |passenger|
-          {
-            passenger_id: passenger.id,
-            passenger_name: passenger.name,
-            passenger_age: passenger.age,
-            passenger_gender: passenger.gender,
-            passenger_email: passenger.email,
-            passenger_phone: passenger.phone
-          }
-        end,
-        from_station: booking.from_station,
-        destination: booking.destination_station,
-        train_id: booking.train&.id,
-        train_name: booking.train&.train_name,
-        train_number: booking.train&.train_number,
-        date_of_booking: booking.date_of_booking,
-        travel_date: booking.travel_date,
-        status: booking.status
-      }
-    end
-
-    render json: @booking_details
+  def index
+    render json: mapping(BookingDetail.all)
   end
 
   def show
-    render json: @booking_detail
+    render json: mapping([@booking_detail])
   end
 
-  def create
+  def create # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
     @booking_detail = BookingDetail.new(booking_detail_params)
     @booking_detail.pnr_number = "PNR#{generate_pnr_number}"
 
     if valid?(@booking_detail)
-      if @booking_detail.save
-        render json: { message: 'booking created', created_booking_details: @booking_detail }, status: :created
+      passenger_ids = params[:passenger_details_ids]
+
+      if passenger_ids.present? && passenger_ids.length == @booking_detail.seats
+        @booking_detail.passenger_details_ids = passenger_ids
+
+        if @booking_detail.save
+          render json: { message: 'booking placed', created_booking_details: mapping([@booking_detail]) },
+                 status: :created
+        else
+          render json: { message: 'failed to book seats', errors: @booking_detail.errors.full_messages },
+                 status: :unprocessable_entity
+        end
+      else
+        render json: { message: 'all passenger details must be entered' }, status: :unprocessable_entity
       end
     else
       render json: { message: 'booking could not be created', errors: @booking_detail.errors.full_messages },
@@ -52,15 +38,11 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
   end
 
   def update
-    if valid?(@booking_detail)
-      if @booking_detail.update(booking_detail_params)
-        render json: { message: 'booking updated successfully' }, status: :ok
-      else
-        render json: { message: 'booking could not be updated' }, status: :unprocessable_entity
-      end
+    if @booking_detail.update(booking_detail_params)
+      render json: { message: 'booking updated successfully' }, status: :ok
     else
-      render json: { message: 'booking could not be updated', errors: @booking_detail.errors.full_messages },
-             status: :unprocessable_entity
+      render json: { message: 'booking could not be updated' }, status: :unprocessable_entity
+
     end
   end
 
@@ -89,8 +71,9 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
 
   # combinational search
   def combination_search # rubocop:disable Metrics/MethodLength
-    search_params = params.require(:booking_detail).permit(:pnr_number, :seats, :passenger_details_id, :train_details_id, :from_station, # rubocop:disable Layout/LineLength
-                                                           :destination_station, :date_of_booking, :travel_date, :status, :train_number) # rubocop:disable Layout/LineLength
+    search_params = params.require(:booking_detail)
+                          .permit(:pnr_number, :seats, :passenger_details_id, :train_details_id, :from_station,
+                                  :destination_station, :date_of_booking, :travel_date, :status, :train_number)
     conditions = {}
 
     search_params.each do |key, value|
@@ -199,44 +182,100 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
     render json: { message: 'booking id not found' }, status: :not_found
   end
 
+  # request parameters
   def booking_detail_params
-    params.require(:booking_detail).permit(:seats, :passenger_details_id, :train_details_id, :from_station,
-                                           :destination_station, :date_of_booking, :travel_date, :status)
+    params.require(:booking_detail).permit(:seats, :train_details_id, :from_station,
+                                           :destination_station, :date_of_booking, :travel_date, :status,
+                                           passenger_details_ids: [])
   end
 
+  # pnr number generation
   def generate_pnr_number
     loop do
-      pnr_number = SecureRandom.hex(5).upcase
+      pnr_number = rand(10**9..10**10 - 1).to_s
       return pnr_number unless BookingDetail.exists?(pnr_number: pnr_number)
     end
   end
 
-  def valid?(booking) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
+  def valid?(booking) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
     @booking = booking
 
-    fields = %i[seats from_station destination_station date_of_booking travel_date status passenger_details_id
-                train_details_id]
+    fields = %i[seats from_station destination_station date_of_booking travel_date status train_details_id
+                passenger_details_ids]
 
     fields.each do |field|
       if @booking[field].blank?
-        @booking.errors.add(field, '- can\'t be blank')
+        @booking.errors.add(field, 'can\'t be blank')
         return false
       end
     end
 
-    @booking.errors.add(:seats, '- seats can\'t be negative') if @booking.seats.negative?
-
-    status_pattern = /\A\b(pending|confirmed|canceled)\b\z/i
-    unless @booking.status.match?(status_pattern)
-      @booking.errors.add(:status, '- invalid status')
+    if @booking.seats.positive?
+      if @booking.seats > @booking.train.seats
+        @booking.errors.add(:seats, "- available train seats: #{@booking.train.seats}")
+        return false
+      end
+    else
+      @booking.errors.add(:seats, "can't be negative")
       return false
     end
 
-    if @booking.seats > @booking.train.seats
-      @booking.errors.add(:seats, "- available train seats: #{@booking.train.seats}")
+    if @booking.from_station != @booking.destination_station
+      if @booking.from_station != @booking.train.beginning_station
+        @booking.errors.add(:from_station, "is not available, train starts from #{@booking.train.beginning_station}")
+        return false
+      elsif @booking.destination_station != @booking.train.destination_station
+        @booking.errors.add(:destination_station,
+                            "is not available, train goes to #{@booking.train.destination_station}")
+        return false
+      end
+    else
+      @booking.errors.add(:from_station, "& Destination Station can't be same")
+      return false
+    end
+
+    if @booking.travel_date != @booking.train.start_time
+      @booking.errors.add(:travel_date, "is not available, available train time: #{@booking.train.start_time}")
+      return false
+    end
+
+    if @booking.travel_date < @booking.date_of_booking
+      @booking.errors.add(:date_of_booking, 'can\'t be greater than Travel Date')
+      return false
+    end
+
+    status_pattern = /\A\b(pending|confirmed|canceled)\b\z/i
+    unless @booking.status.match?(status_pattern)
+      @booking.errors.add(:status, 'is invalid')
       return false
     end
 
     true
+  end
+
+  def mapping(booking) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+    booking.map do |booking| # rubocop:disable Lint/ShadowingOuterLocalVariable
+      {
+        booking_id: booking.id,
+        pnr_number: booking.pnr_number,
+        seats_booked: booking.seats,
+        passenger_details: booking.passengers.map do |passenger|
+          {
+            passenger_name: passenger.name,
+            passenger_age: passenger.age,
+            passenger_gender: passenger.gender,
+            passenger_email: passenger.email,
+            passenger_phone: passenger.phone
+          }
+        end,
+        from_station: booking.from_station,
+        destination: booking.destination_station,
+        train_details: { train_name: booking.train&.train_name,
+                         train_number: booking.train&.train_number },
+        date_of_booking: booking.date_of_booking,
+        travel_date: booking.travel_date,
+        status: booking.status
+      }
+    end
   end
 end
