@@ -39,10 +39,9 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
 
   def update
     if @booking_detail.update(booking_detail_params)
-      render json: { message: 'booking updated successfully' }, status: :ok
+      render json: { message: 'booking updated successfully', updated_record: mapping([@booking_detail]) }, status: :ok
     else
       render json: { message: 'booking could not be updated' }, status: :unprocessable_entity
-
     end
   end
 
@@ -66,7 +65,7 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
                                  { travel_date: pattern },
                                  { status: pattern })
 
-    render json: (@bookings.present? ? @bookings : { message: 'no matches found' }), status: :not_found
+    render json: (@bookings.present? ? mapping([@bookings]) : { message: 'no matches found' }), status: :not_found
   end
 
   # combinational search
@@ -83,7 +82,7 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
     @booking_details = BookingDetail.or(conditions)
 
     if @booking_details.present?
-      render json: @booking_details
+      render json: mapping([@booking_details])
     else
       render json: { message: 'no records found' }, status: :not_found
     end
@@ -95,7 +94,7 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
     booked_collections = BookingDetail.where(status: status)
 
     if booked_collections.present?
-      render json: booked_collections, status: :ok
+      render json: mapping([booked_collections]), status: :ok
     else
       render json: { message: 'no booked collections found' }, status: :not_found
     end
@@ -116,16 +115,28 @@ class BookingDetailsController < ApplicationController # rubocop:disable Style/D
   end
 
   # change schedule
-  def change_schedule # rubocop:disable Metrics/MethodLength
+  def change_schedule # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/PerceivedComplexity
     booking = BookingDetail.find(params[:id])
     if booking.status != 'canceled'
       travel_date_param = params[:travel_date]
+      from_station = params[:from_station]
+      destination_station = params[:destination_station]
       if travel_date_param > booking.travel_date
-        booking.travel_date = travel_date_param
-        if booking.save
-          render json: { message: 'schedule changed successfully' }, status: :ok
+        if from_station.present?
+          if destination_station.present? # rubocop:disable Metrics/BlockNesting
+            booking.travel_date = travel_date_param
+            booking.from_station = from_station
+            booking.destination_station = destination_station
+            if booking.save # rubocop:disable Metrics/BlockNesting
+              render json: { message: 'schedule changed successfully', new_schedule: mapping([booking]) }, status: :ok
+            else
+              render json: { message: 'failed to change schedule' }, status: :unprocessable_entity
+            end
+          else
+            render json: { message: 'destination station must be present' }, status: :unprocessable_entity
+          end
         else
-          render json: { message: 'failed to change schedule' }, status: :unprocessable_entity
+          render json: { message: 'from station must be present' }, status: :unprocessable_entity
         end
       else
         render json: { message: 'schedule must be in future' }, status: :unprocessable_entity
